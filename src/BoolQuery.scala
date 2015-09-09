@@ -2,12 +2,30 @@
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashMap
 import scala.collection.mutable.ListBuffer
+import scala.collection.mutable.Queue
+import scala.collection.mutable.Stack
 import scala.io.Source
 
 /**
  * @author adikou
  */
 object BoolQuery {
+  
+    /* Currently the inverted index is built upon 
+     * every run of the program. Further work is to
+     * provide option to start a new index, or add
+     * documents to append to current index.
+     */
+  
+    private var index = HashMap.empty[String, ListBuffer[Int]]
+    private val cmds = Array("build", "query", "help")
+    private val ops = Array("AND", "OR")
+    private val opPrecedence = Predef.Map("AND" -> 2, "OR" -> 1)
+    private val opFuncMap = Predef.Map("AND" -> {this.AND(_,_)},
+                                       "OR"  -> {this.OR (_,_)})
+    private val err = """|Unrecognized command. Type 'help' for a list
+                         |of commands""".stripMargin.replaceAll("\n", " ")
+    private val cmd_help = "\nbuild <DOCUMENT>\nquery <QUERY>\n"
     
     def map(words: ArrayBuffer[Posting]) = {
         val terms = HashMap.empty[String, ListBuffer[Int]]
@@ -41,8 +59,7 @@ object BoolQuery {
         val lines = Source.fromFile(file).getLines.toList
         val words = BoolQuery.tokenize(lines)
         CustomMergeSort.mergesort(words, 0, words.length-1)
-        val index = BoolQuery.map(words)
-        index
+        this.index = BoolQuery.map(words)
     }
     
     
@@ -85,13 +102,83 @@ object BoolQuery {
         
     }
     
+    
+    /* Simple Dijkstra's Shunting Yard Algorithm to 
+     * convert the infix query to RPN notation
+     * */
+    
+    def parseQuery(query: Array[String]) = {
+        val rpnQuery = new Queue[String]
+        val opStack  = new Stack[String]
+        for(token <- query) {
+            if(ops.contains(token.toUpperCase)) {
+                while(opStack.length > 0 && opPrecedence.contains(opStack.top)
+                     && (opPrecedence(token) <= opPrecedence(opStack.top))) {
+                    rpnQuery.enqueue(opStack.pop)
+                }
+                opStack.push(token)
+            }
+            else if(token.equals("("))
+                opStack.push(token)
+            else if(token.equals(")")) {
+                while(opStack.length > 0 && !opStack.top.equals("("))
+                    rpnQuery.enqueue(opStack.pop)
+                if(opStack.length == 0)
+                    "err"
+                opStack.pop                    
+            }
+            else rpnQuery.enqueue(token)
+        }
+        
+        while(opStack.length > 0)
+            rpnQuery.enqueue(opStack.pop)
+        
+        rpnQuery.toArray
+    }
+    
+    /*
+     * Stack based evaluation of RPN notation
+     * */
+    
+    def evaluateQuery(query: Array[String]) = {
+        val op = new Stack[List[Int]]
+        for(token <- query) {
+            if(ops.contains(token.toUpperCase)) {
+                if(op.length > 0)
+                    op.push(opFuncMap(token.toUpperCase)(
+                            op.pop, op.pop))
+            }
+            else op.push(index(token).toList)
+        }
+        println(op.top.mkString(" -> "))
+        op.pop
+    }
+    
     def main(args: Array[String]) = {
         
-        val index = BoolQuery.constructInvertedIndex(args(0))
-        /*index.foreach((x) => println(x._1 + " -> " + x._2.mkString(" ")))
-         *val res = BoolQuery.OR(index("new").toList, index("patients").toList)
-         *println(res.mkString(" -> "))
-         */
-         
+        println("BoolQuery v0.1")
+        println("Type 'help' for a list of commands")
+        
+        //BoolQuery.constructInvertedIndex(args(0))
+        while(true) {
+            val cmdLine = scala.io.StdIn.readLine("BoolQuery> ")
+            if(cmdLine == null) 
+                System.exit(0)
+            val cmdArgs = cmdLine.replaceAll("[(]", "( ")
+                                 .replaceAll("[)]", " )").split(" ").toArray
+            cmds.indexOf(cmdArgs(0)) match {
+              case 0 => BoolQuery.constructInvertedIndex(cmdArgs(1))
+                        println("Inverted index constructed for " + cmdArgs(1))
+              case 1 => BoolQuery.evaluateQuery(
+                          (BoolQuery.parseQuery(
+                                       cmdArgs.slice(1, cmdArgs.length+1)
+                                     )
+                          )
+                        )
+              case 2 => println (cmd_help)
+              case _ => println (err)
+            } 
+            
+        }
     }  
 }
