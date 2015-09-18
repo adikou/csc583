@@ -7,18 +7,18 @@ object CustomMergeSort {
      
     // Mergesort is the only decent stable sort.
     // Forget scala.util.Sorting to help out.
-    def merge(A: ArrayBuffer[Posting],
-              p: Int, q: Int, r: Int): ArrayBuffer[Posting] = {
+    def merge(A: ArrayBuffer[PostToken],
+              p: Int, q: Int, r: Int): ArrayBuffer[PostToken] = {
         val n1 = q-p+1
         val n2 = r-q
-        val L = new ArrayBuffer[Posting]
-        val R = new ArrayBuffer[Posting]
+        val L = new ArrayBuffer[PostToken]
+        val R = new ArrayBuffer[PostToken]
         for(i <- 0 until n1) { 
-            L += new Posting
+            L += new PostToken
             L(i).equate(A(p+i))
         }
         for(j <- 0 until n2) {
-            R += new Posting
+            R += new PostToken
             R(j).equate(A(q+j+1))
         }
         var i = 0
@@ -54,8 +54,8 @@ object CustomMergeSort {
         A
     }
     
-    def mergesort(A: ArrayBuffer[Posting],
-                  p: Int, r: Int): ArrayBuffer[Posting] = {
+    def mergesort(A: ArrayBuffer[PostToken],
+                  p: Int, r: Int): ArrayBuffer[PostToken] = {
         if(p < r) {
             val q = (p+r)/2
             mergesort(A,p,q)

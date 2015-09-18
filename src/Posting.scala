@@ -1,14 +1,9 @@
-
+import scala.collection.mutable.ArrayBuffer
 
 /**
  * @author adikou
  */
-class Posting(tk: String, doc: Int) {
-  var token: String = tk
+class Posting(doc: Int) {
   var docID: Int = doc
-  def this() = this("",0)
-  def equate(that: Posting) = {
-    this.token = that.token
-    this.docID = that.docID
-  }
+  val pos: ArrayBuffer[Int] = new ArrayBuffer[Int]
 }
