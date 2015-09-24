@@ -1,5 +1,5 @@
-
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.ListBuffer
 import scala.collection.mutable.HashMap
 import scala.collection.mutable.Queue
 import scala.collection.mutable.Stack
@@ -13,6 +13,9 @@ import java.nio.file.{Files, FileSystems}
  * and access is O(1). Only penalty *might* be
  * prepending to this list. Don't see that 
  * happening any time soon. 
+ * 
+ * @TODO Add modularization of methods by splitting
+ *       into query classes, functional, and main classes.
  */
 
 object BoolQuery {
@@ -25,10 +28,11 @@ object BoolQuery {
   
     private var index = HashMap.empty[String, ArrayBuffer[Posting]]
     private val cmds = Array("build", "query", "help", "quit")
-    private val ops = Array("\\AND", "\\OR")
-    private val opPrecedence = Predef.Map("\\AND" -> 2, "\\OR" -> 1)
-    private val opFuncMap = Predef.Map("\\AND" -> {this.AND(_,_)},
-                                       "\\OR"  -> {this.OR (_,_)})
+    private val ops = Map("\\and" -> 1, "\\or" -> 2, "\\u" -> 3,
+                          "\\d" -> 4)
+    private val opPrecedence = Predef.Map("\\and" -> 2, "\\u"  -> 2, 
+                                          "\\d"   -> 2, "\\or" -> 1)
+
     private val err = """|Unrecognized command. Type 'help' for a list
                          |of commands""".stripMargin.replaceAll("\n", " ")
     private val cmd_help =  "\nbuild <path/to/DOCUMENT>\n"
@@ -109,50 +113,152 @@ object BoolQuery {
      * need only a list of docIDs. Copying references can
      * potentially copy the positions list as well, which we 
      * really don't need.
+     * 
+     * 09/24/15 - Switched from buffered iterator to index based 
+     *            array access. Originally, horribly space-inefficient
+     *            O(n) to the length of the arrays, when buffered.
      */
 
     def AND(p1: Array[Posting], p2: Array[Posting]): Array[Posting] = {
         val result = new ArrayBuffer[Posting]
-        val it1 = p1.iterator.buffered
-        val it2 = p2.iterator.buffered
+        var it1 = 0
+        var it2 = 0
+
+        val N1 = p1.length
+        val N2 = p2.length
         
-        while(!it1.isEmpty && !it2.isEmpty) {
-            if(it1.head.docID == it2.head.docID) {
-                result += new Posting(it1.head.docID)
-                it1.next
-                it2.next
+        while(it1 < N1 && it2 < N2) {
+            if(p1(it1).docID == p2(it2).docID) {
+                result += p1(it1)
+                it1 += 1
+                it2 += 1
             }
-            else if(it1.head.docID < it2.head.docID) it1.next
-            else it2.next
+            else if(p1(it1).docID < p2(it2).docID) it1 += 1
+            else it2 += 1
         }
         result.toArray
     }
     
     def OR(p1: Array[Posting], p2: Array[Posting]): Array[Posting] = {
         val result = new ArrayBuffer[Posting]
-        val it1 = p1.iterator.buffered
-        val it2 = p2.iterator.buffered
+        var it1 = 0
+        var it2 = 0
+
+        val N1 = p1.length
+        val N2 = p2.length
         
-        while(!it1.isEmpty && !it2.isEmpty) {
-            if(it1.head.docID == it2.head.docID) {
-                result += new Posting(it1.head.docID)
-                it1.next
-                it2.next
+        while(it1 < N1 && it2 < N2) {
+            if(p1(it1).docID == p2(it2).docID) {
+                result += p1(it1)
+                it1 += 1
+                it2 += 1
             }
-            else if(it1.head.docID < it2.head.docID) 
-                    result += new Posting(it1.next.docID)
-            else result += new Posting(it2.next.docID)
+            else if(p1(it1).docID < p2(it2).docID) {
+                    result += p1(it1)
+                    it1 += 1
+            }
+            else {
+                result += p2(it2)
+                it2 += 1
+            }
         }
         
-        val rest = if(it1.isEmpty) it2 else it1
-        while(rest.hasNext)
-            result += new Posting(rest.next.docID)
+        while(it1 < N1) {
+            result += p1(it1)
+            it1 += 1
+        }
+        while(it2 < N2) {
+            result += p2(it2)
+            it2 += 1
+        }
 
         result.toArray
         
     }
     
-    
+    /* 
+     * Positional Intersect. Implemented as per Manning et al.
+     * 09/18/15 - Agnostic to direction of 'k'
+     * 09/24/15 - After week of absence, implemented directional query.
+     */
+    def POSITIONAL_AND(p1: Array[Posting], p2: Array[Posting], 
+                       k: Int, isDirectional: Boolean): Array[Posting] = {
+        val result = new ArrayBuffer[Posting]
+        var it1 = 0
+        var it2 = 0
+
+        val N1 = p1.length
+        val N2 = p2.length
+
+        while(it1 < N1 && it2 < N2) {
+            if(p1(it1).docID == p2(it2).docID) {
+                
+                /*
+                 * Note: Choosing between List and ListBuffer is no choice.
+                 * Appending to List is O(n) while l.tail is O(1)
+                 * Appending to ListBuffer is O(1) but tail is O(n).
+                 */
+
+                var l = List[Int]()
+                val pp1 = p1(it1).pos
+                val pp2 = p2(it2).pos
+
+                var _it1 = 0
+                var _it2 = 0
+
+                val _N1 = pp1.length
+                val _N2 = pp2.length
+
+                object e extends Exception {}
+                
+                while(_it1 < _N1) {
+                    try{
+                        while(_it2 < _N2) {
+                        	if(!isDirectional) {
+	                            if(math.abs(pp1(_it1) - pp2(_it2)) <= k)
+	                                l ++= List(pp2(_it2))
+	                            else if(pp2(_it2) > pp1(_it1))
+	                                throw e
+	                            _it2 += 1
+                        	}
+                        	else {
+                        		if(pp1(_it1) + k >= pp2(_it2)) {
+                                    if(pp2(_it2) > pp1(_it1))
+                                        l ++= List(pp2(_it2))
+                                    _it2 += 1
+                        		}
+                        		else throw e
+                        	}
+                        }
+                    } catch {
+                    case e: Exception => 
+                    } 
+
+                    if(!isDirectional) {
+                        while(l.length != 0 && math.abs(l.head - pp1.head) > k)
+                            l = l.tail
+                    }
+
+                    else {
+                        while(l.length != 0 && (pp1(_it1) + k < l.head))
+                            l = l.tail
+                    } 
+
+                    l.foreach((a: Int) => result += new Posting(p1(it1).docID,
+                                                    ArrayBuffer(pp1(_it1), a)))
+                    _it1 += 1
+                }
+
+                it1 += 1
+                it2 += 1
+            }
+            else if(p1(it1).docID < p2(it2).docID) it1 += 1
+            else it2 += 1
+        }
+
+        result.toArray
+    } 
+
     /* Simple Dijkstra's Shunting Yard Algorithm to 
      * convert the infix query to RPN notation
      * */
@@ -161,9 +267,12 @@ object BoolQuery {
         val rpnQuery = new Queue[String]
         val opStack  = new Stack[String]
         for(token <- query) {
-            if(ops.contains(token.toUpperCase)) {
-                while(opStack.length > 0 && opPrecedence.contains(opStack.top)
-                     && (opPrecedence(token) <= opPrecedence(opStack.top))) {
+            if(ops.contains(Helper.processOp(token))) {
+                val t = Helper.processOp(token)
+                while(opStack.length > 0 
+                     && opPrecedence.contains(Helper.processOp(opStack.top))
+                     && (opPrecedence(t) <= opPrecedence(
+                         Helper.processOp(opStack.top)))) {
                     rpnQuery.enqueue(opStack.pop)
                 }
                 opStack.push(token)
@@ -195,12 +304,28 @@ object BoolQuery {
     
     def evaluateQuery(query: Array[String]): Unit = {
         val op = new Stack[Array[Posting]]
-        if(query.length > 0) {
+        val N = query.length
+        if(N > 0) {
+            val flag = if(ops.contains(Helper.processOp(query(N-1))))
+                            ops(Helper.processOp(query(N-1))) > 2
+                        else false
             for(token <- query) {
-                if(ops.contains(token.toUpperCase)) {
-                    if(op.length > 0)
-                        op.push(opFuncMap(token.toUpperCase)(
-                              op.pop, op.pop))
+                if(ops.contains(Helper.processOp(token))) {
+                    if(op.length > 0) {
+                        ops(Helper.processOp(token)) match {
+                            case 1 => op.push(AND(op.pop, op.pop))
+                            case 2 => op.push(OR (op.pop, op.pop))
+                        
+                            /* Positional for now. When more ops are
+                             * included, add more dissection options
+                             */ 
+                            case _ => val x = Helper.splitOp(token)
+                            		  val op1 = op.pop
+                            		  val op2 = op.pop
+                                      op.push(POSITIONAL_AND(op2, op1,
+                                              x(2).toInt, x(1) == "d"))
+                        }
+                    }
                 }
                 else if(index.contains(token))
                     op.push(index(token).toArray)
@@ -216,13 +341,15 @@ object BoolQuery {
                 while(it.hasNext) {
                     print(it.head.docID)
                     val _it = it.next.pos.iterator
-                    if(_it.hasNext) print(" : ") 
+                    if(flag) print(" : ") 
                     else if(it.hasNext) print(" -> ")
                          else println()
-
-                    while(_it.hasNext) {
-                        print(_it.next)
-                        if(_it.hasNext) print(" -> ") else println()
+                    if(flag) {
+                    	print("(")
+                        while(_it.hasNext) {
+                            print(_it.next)
+                            if(_it.hasNext) print(", ") else println(")")
+                        }
                     }
                 }
             }
