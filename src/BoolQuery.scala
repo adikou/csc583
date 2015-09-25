@@ -235,7 +235,7 @@ object BoolQuery {
                     } 
 
                     if(!isDirectional) {
-                        while(l.length != 0 && math.abs(l.head - pp1.head) > k)
+                        while(l.length != 0 && math.abs(l.head - pp1(_it1)) > k)
                             l = l.tail
                     }
 
