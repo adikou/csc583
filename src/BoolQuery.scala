@@ -33,6 +33,8 @@ object BoolQuery {
     private val opPrecedence = Predef.Map("\\and" -> 2, "\\u"  -> 2, 
                                           "\\d"   -> 2, "\\or" -> 1)
 
+    private val docIDToName = new ArrayBuffer[String]
+
     private val err = """|Unrecognized command. Type 'help' for a list
                          |of commands""".stripMargin.replaceAll("\n", " ")
     private val cmd_help =  "\nbuild <path/to/DOCUMENT>\n"
@@ -67,11 +69,12 @@ object BoolQuery {
     
     def tokenize(lines: List[String]): ArrayBuffer[PostToken] = {
         val words = new ArrayBuffer[PostToken]()
-        var id = 1
+        var id = 0
 
         for(line <- lines) {
             var pos = 1
-            val tokens = line.split(" ")
+            val tokens = line.split(" ").toArray
+            this.docIDToName += tokens(0)
             for(i <- 1 until tokens.length){
                 words += new PostToken(tokens(i).toLowerCase, id, pos)
                 pos += 1
@@ -289,7 +292,7 @@ object BoolQuery {
                 }
                 opStack.pop                    
             }
-            else rpnQuery.enqueue(token)
+            else rpnQuery.enqueue(token.toLowerCase)
         }
         
         while(opStack.length > 0)
@@ -339,7 +342,7 @@ object BoolQuery {
             else {
                 val it = op.top.iterator.buffered
                 while(it.hasNext) {
-                    print(it.head.docID)
+                    print(docIDToName(it.head.docID))
                     val _it = it.next.pos.iterator
                     if(flag) print(" : ") 
                     else if(it.hasNext) print(" -> ")
